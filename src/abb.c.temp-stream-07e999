@@ -1,0 +1,240 @@
+#include "abb.h"
+#include <stdlib.h>
+
+abb_t *abb_crear(int (*cmp)(const void *, const void *))
+{
+	if (!cmp)
+		return NULL;
+
+	struct abb_t *abb = malloc(sizeof(abb_t));
+	if (!abb)
+		return NULL;
+
+	abb->raiz = NULL;
+	abb->nodos = 0;
+	abb->comparador = cmp;
+
+	return abb;
+}
+
+/*Implementamos la inserción de elementos, permitiendo repetidos
+ y reemplazando el contenido si ya existe el elemento.*/
+
+bool abb_insertar(abb_t *abb, const void *elemento)
+{
+	if (!abb)
+		return false;
+
+	nodo_t *nuevo = malloc(sizeof(nodo_t));
+	if (!nuevo)
+		return false;
+
+	nuevo->elemento = (void *)elemento;
+	nuevo->izq = NULL;
+	nuevo->der = NULL;
+
+	nodo_t **actual = &abb->raiz; //doble puntero pq raiz es un puntero tmb
+
+	while (*actual) {
+		int cmp_result = abb->comparador(elemento, (*actual)->elemento);
+		if (cmp_result <=
+		    0) { // menores o iguales van al lado izquierdo
+			actual = &(*actual)->izq;
+		} else { // mayores van al lado derecho
+			actual = &(*actual)->der;
+		}
+	}
+
+	*actual = nuevo;
+	abb->nodos++;
+	return true;
+}
+
+//verifica si un elemento está presente en el ABB.
+bool abb_existe(const abb_t *abb, const void *elemento)
+{
+	if (!abb)
+		return false;
+
+	nodo_t *actual = abb->raiz;
+	while (actual) {
+		int cmp_result = abb->comparador(elemento, actual->elemento);
+		if (cmp_result == 0)
+			return true;
+		actual = (cmp_result < 0) ? actual->izq : actual->der;
+	}
+	return false;
+}
+
+void *abb_buscar(const abb_t *abb, const void *elemento)
+{
+	if (!abb)
+		return NULL;
+
+	nodo_t *actual = abb->raiz;
+	void *resultado = NULL;
+
+	while (actual) {
+		int cmp_result = abb->comparador(elemento, actual->elemento);
+		if (cmp_result == 0)
+			resultado = actual->elemento;
+		actual = (cmp_result < 0) ? actual->izq : actual->der;
+	}
+	return resultado;
+}
+
+void *abb_sacar(abb_t *abb, const void *elemento)
+{
+	if (!abb || !abb->raiz)
+		return NULL;
+
+	nodo_t **actual = &abb->raiz;
+	void *elemento_sacado = NULL;
+
+	while (*actual) {
+		int cmp_result = abb->comparador(elemento, (*actual)->elemento);
+		if (cmp_result == 0) {
+			elemento_sacado = (*actual)->elemento;
+			// Manejo de casos: 0 hijos, 1 hijo, 2 hijos
+			nodo_t *nodo_a_eliminar = *actual;
+			if (!nodo_a_eliminar->izq &&
+			    !nodo_a_eliminar->der) { // Caso 0 hijos
+				*actual = NULL;
+			} else if (!nodo_a_eliminar->izq ||
+				   !nodo_a_eliminar->der) { // Caso 1 hijo
+				*actual = nodo_a_eliminar->izq ?
+						  nodo_a_eliminar->izq :
+						  nodo_a_eliminar->der;
+			} else { // Caso 2 hijos: buscar predecesor inorden
+				nodo_t **predecesor = &nodo_a_eliminar->izq;
+				while ((*predecesor)->der) {
+					predecesor = &(*predecesor)->der;
+				}
+				nodo_a_eliminar->elemento =
+					(*predecesor)->elemento;
+				nodo_t *nodo_a_reemplazar = *predecesor;
+				*predecesor = nodo_a_reemplazar->izq;
+				free(nodo_a_reemplazar);
+			}
+			free(nodo_a_eliminar);
+			abb->nodos--;
+			break;
+		}
+		actual = (cmp_result < 0) ? &(*actual)->izq : &(*actual)->der;
+	}
+	return elemento_sacado;
+}
+
+size_t abb_recorrer(const abb_t *abb, enum abb_recorrido modo,
+		    bool (*f)(void *, void *), void *ctx)
+{
+	if (!abb || !f)
+		return 0;
+
+	size_t contador = 0;
+
+	void recorrer_nodos(nodo_t * nodo)
+	{
+		if (!nodo)
+			return;
+
+		if (modo == ABB_PREORDEN) {
+			if (!f(nodo->elemento, ctx))
+				return;
+			contador++;
+			recorrer_nodos(nodo->izq);
+			recorrer_nodos(nodo->der);
+		} else if (modo == ABB_INORDEN) {
+			recorrer_nodos(nodo->izq);
+			if (!f(nodo->elemento, ctx))
+				return;
+			contador++;
+			recorrer_nodos(nodo->der);
+		} else if (modo == ABB_POSTORDEN) {
+			recorrer_nodos(nodo->izq);
+			recorrer_nodos(nodo->der);
+			if (!f(nodo->elemento, ctx))
+				return;
+			contador++;
+		}
+	}
+
+	recorrer_nodos(abb->raiz);
+	return contador;
+}
+
+size_t abb_vectorizar(const abb_t *abb, enum abb_recorrido modo, void **vector,
+		      size_t capacidad)
+{
+	if (!abb || !vector || capacidad == 0)
+		return 0;
+
+	size_t contador = 0;
+
+	void vectorizar_nodos(nodo_t * nodo)
+	{
+		if (!nodo || contador >= capacidad)
+			return;
+
+		if (modo == ABB_PREORDEN) {
+			vector[contador++] = nodo->elemento;
+			vectorizar_nodos(nodo->izq);
+			vectorizar_nodos(nodo->der);
+		} else if (modo == ABB_INORDEN) {
+			vectorizar_nodos(nodo->izq);
+
+			if (contador < capacidad)
+				vector[contador++] = nodo->elemento;
+			vectorizar_nodos(nodo->der);
+		} else if (modo == ABB_POSTORDEN) {
+			vectorizar_nodos(nodo->izq);
+			vectorizar_nodos(nodo->der);
+
+			if (contador < capacidad)
+				vector[contador++] = nodo->elemento;
+		}
+	}
+
+	vectorizar_nodos(abb->raiz);
+	return contador;
+}
+
+void abb_destruir(abb_t *abb)
+{
+	if (!abb)
+		return;
+
+	void destruir_nodos(nodo_t * nodo)
+	{
+		if (!nodo)
+			return;
+
+		destruir_nodos(nodo->izq);
+		destruir_nodos(nodo->der);
+		free(nodo);
+	}
+
+	destruir_nodos(abb->raiz);
+	free(abb);
+}
+
+void abb_destruir_todo(abb_t *abb, void (*destructor)(void *))
+{
+	if (!abb)
+		return;
+
+	void destruir_todo_nodos(nodo_t * nodo)
+	{
+		if (!nodo)
+			return;
+
+		destruir_todo_nodos(nodo->izq);
+		destruir_todo_nodos(nodo->der);
+		if (destructor)
+			destructor(nodo->elemento);
+		free(nodo);
+	}
+
+	destruir_todo_nodos(abb->raiz);
+	free(abb);
+}
